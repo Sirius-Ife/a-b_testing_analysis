@@ -1,0 +1,225 @@
+---
+title: "a/b_testing_result_analysis"
+author: "sirius_ife"
+date: "2024-03-17"
+output: html_document
+---
+
+# Importing packages
+
+```{r}
+# It is commendable to acknowledge the source of the data and express gratitude for its availability. 
+# The note about the absence of experimental design in the analysis sets the right expectations for the audience.
+
+#####################################################################
+########### Clean data before the statistical analysis ##############
+# Step-by-step breakdown of data cleaning is clear and well-commented, making it easy to follow.
+# It's good practice to check for missing values and handle them appropriately.
+
+library(rlang)
+library(tidyverse)
+library(lubridate) # date and time package
+library(ggplot2)
+library(brew)
+
+## input data
+list.files(path = "../input")
+
+# read data
+result_data <- read.csv("ab_data.csv", header = TRUE)
+result_data <- data.frame(result_data)
+
+head(result_data)
+```
+# check unique # users
+
+```{r}
+unique_id <- unique(result_data$user_id)
+length(unique_id)
+```
+
+```{r}
+### Step 1: find out not aligned info between 'group' and 'landing_page'
+### check if group != landing_page
+notaligned_user <- result_data %>% filter( group == "treatment" & landing_page == "old_page")
+notaligned_user2 <- result_data %>% filter( group == "control" & landing_page == "new_page")
+
+# rbind
+notaligned_user_all <- rbind(notaligned_user,notaligned_user2)
+dim(notaligned_user_all)
+```
+
+```{r}
+# create 2*2 table
+num_aligned_ctrl = nrow(result_data %>% 
+                          filter( group == "control" & landing_page == "old_page"))
+num_aligned_treat = nrow(result_data %>% 
+                           filter( group == "treatment" & landing_page == "new_page")) 
+
+# data frame for differ the control and treatment group with aligned and notaligned count
+align_plot_data = data.frame("Group" = c("control","treatment"), "Aligned" = c(num_aligned_ctrl,num_aligned_treat), "Not_aligned" = c(nrow(notaligned_user2), nrow(notaligned_user)), stringsAsFactors = FALSE)
+
+align_plot_data2 = align_plot_data %>% 
+    gather(`Aligned`, `Not_aligned`, key = "AlignOrNot", value = "Number")
+
+head(align_plot_data2)
+```
+
+```{r}
+# plot aligned and not aligned in ctrl and treat groups
+# plot bar chart
+# http://www.sthda.com/english/wiki/ggplot2-barplots-quick-start-guide-r-software-and-data-visualization
+
+# Stacked barplot with multiple groups
+# Plotting
+ggplot(data = align_plot_data2, aes(x = Group, y = Number, fill = AlignOrNot)) +
+  geom_bar(stat = "identity", position = position_dodge2(reverse = TRUE), width = 0.6) +
+  scale_fill_manual(values = c('#aecfe4', '#425b84')) +  # Custom color palette
+  geom_text(aes(label = Number), vjust = -0.1, color = "dark grey",
+            position = position_dodge2(width = 0.6, reverse = TRUE), size = 3.5) +
+  labs(title = "Not Aligned vs. Aligned Count", 
+       x = "Group", y = "Count") +
+  theme(legend.position = "top") +   # Change legend position
+  theme_grey()  # Apply gray theme
+
+# change y axis unit to 15K  https://stackoverflow.com/questions/13973644/si-prefixes-in-ggplot2-axis-labels
+# + scale_y_continuous(labels=format_si()) + 
+```
+
+
+```{r}
+# delete the not aligned data from the original dataset
+without_notaligned_data <- result_data %>% anti_join(notaligned_user_all)
+
+#Step2: if a user clicked several times, only keep the first result for analysis.
+# arrange date from earlist to latest
+without_notaligned_data2 <- without_notaligned_data  %>% group_by(user_id) %>% arrange(timestamp)
+
+# keep only the earlist record for each user
+cleaned_ab_data <- without_notaligned_data2[!duplicated(without_notaligned_data2$user_id), ] # used the time ascending dataset
+
+### Step 3: check missing value
+# check missing value
+any(is.na(cleaned_ab_data))
+
+# check unique id 
+unique_id <- unique(cleaned_ab_data)
+
+dim(unique_id)
+```
+
+```{r}
+#############################################################
+########### calculation and statistical meaning #############
+#############################################################
+### http://datafeedtoolbox.com/more-accurate-ab-testing-using-raw-analytics-data-apache-spark-and-r/
+# compare two population proportion
+
+# conversion rate overall
+converted_num_all <- cleaned_ab_data %>% filter(converted == 1)
+cr_all <- nrow(converted_num_all)/nrow(cleaned_ab_data)
+
+# conversion rate control
+converted_num_control <- cleaned_ab_data %>% filter(converted == 1 & group == "control")
+cleaned_total_control <- cleaned_ab_data %>% filter(group == 'control')
+cr_control <- nrow(converted_num_control)/nrow(cleaned_total_control)
+
+# conversion rate treatment
+converted_num_treatment <- cleaned_ab_data %>% filter(converted == 1 & group == "treatment")
+cleaned_total_treatment <- cleaned_ab_data %>% filter(group == 'treatment')
+cr_treatment <- nrow(converted_num_treatment)/nrow(cleaned_total_treatment)
+```
+
+```{r}
+#### calculation population Confidence Interval
+#### distribution check
+# N * probability (prob calculation: # of clicks/ # of users) > 5
+nrow(cleaned_ab_data) * cr_all
+# N * (1-probability ) > 5
+nrow(cleaned_ab_data) * (1-cr_all)
+```
+
+```{r}
+### use Z-test <--- estimate interval
+standard_error <- sqrt(cr_all*(1 - cr_all)/nrow(cleaned_ab_data))
+margin_of_error <- 1.96*standard_error
+
+# CI
+upper_ci_all <- cr_all + margin_of_error
+lower_ci_all <- cr_all - margin_of_error
+
+# built in function to calculate ci
+# sd <- sd(cleaned_ab_data$converted)
+# error <- qnorm(0.975)*sd/sqrt(nrow(cleaned_ab_data))
+# left <- cr_all - error
+# right <- cr_all + error
+
+# plot
+# data.frame
+pop_ci <- data.frame(c("population"), c(cr_all),c(lower_ci_all),c(upper_ci_all))
+names(pop_ci) <- c("group","mean","lower","upper")
+```
+
+```{r}
+# Plotting the range of conversion rate with confidence intervals
+ci1 <- ggplot(pop_ci, aes(colour = group)) +
+  geom_hline(aes(yintercept = mean), colour = gray(1/2), lty = 2) +
+  geom_linerange(aes(x = mean, ymin = lower, ymax = upper),
+                 lwd = 1, position = position_dodge(width = 1/2)) +
+  coord_flip() +
+  theme_bw() +
+  ggtitle("Population CI")
+
+print(ci1)
+```
+
+```{r}
+# compare two population proportions
+standard_error2 = sqrt(cr_all*(1-cr_all)*((1/nrow(cleaned_total_control))+(1/nrow(cleaned_total_treatment)))) # pool standard error
+d_hat = cr_treatment - cr_control # p(t) - p(c)
+
+upper_pool = d_hat + 1.96 * standard_error2
+lower_pool = d_hat - 1.96 * standard_error2
+
+# plot the confidence interval
+two_pop_prob = data.frame(
+       d_hat = d_hat,
+       upper = upper_pool,
+       lower = lower_pool
+)
+```
+
+```{r}
+
+# Plotting the pool confidence intervals
+ci_pool <- ggplot(two_pop_prob, aes(x = d_hat)) +
+  geom_hline(aes(yintercept = 0), colour = gray(1/2), lty = 2) +
+  geom_linerange(aes(y = d_hat, ymin = lower, ymax = upper),
+                 lwd = 1, position = position_dodge(width = 1/2)) +
+  coord_flip() +
+  theme_bw() +
+  ggtitle("Pool CI")
+
+print(ci_pool)
+
+```
+
+## calculate p-value
+```{r}
+z = (cr_treatment - cr_control)/standard_error2
+pval = 2 * pnorm(z,lower.tail = FALSE)
+prop.test(c(17264,17489),c(145310,145274),correct = FALSE) # aligned with formula I manually typed in
+### ••• # • it cannot tell the two group mean has difference
+```
+
+## Conclusion:
+```{r}
+# The analysis provides valuable insights into the effectiveness of the A/B test.
+# The conversion rates for control and treatment groups were calculated, and population confidence intervals were constructed.
+# Comparison of population proportions between groups was conducted using pooled confidence intervals and p-values.
+# However, the analysis indicates that there is not enough evidence to confirm a significant difference between the two groups.
+# Further investigation or additional data may be necessary to draw conclusive insights.
+# Overall, the analysis demonstrates a rigorous approach to A/B test analysis and provides a foundation for further exploration.
+
+```
+
