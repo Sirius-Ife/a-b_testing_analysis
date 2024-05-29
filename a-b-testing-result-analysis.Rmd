@@ -22,8 +22,6 @@ library(lubridate) # date and time package
 library(ggplot2)
 library(brew)
 
-## input data
-list.files(path = "../input")
 
 # read data
 result_data <- read.csv("ab_data.csv", header = TRUE)
@@ -68,7 +66,6 @@ head(align_plot_data2)
 ```{r}
 # plot aligned and not aligned in ctrl and treat groups
 # plot bar chart
-# http://www.sthda.com/english/wiki/ggplot2-barplots-quick-start-guide-r-software-and-data-visualization
 
 # Stacked barplot with multiple groups
 # Plotting
@@ -82,8 +79,6 @@ ggplot(data = align_plot_data2, aes(x = Group, y = Number, fill = AlignOrNot)) +
   theme(legend.position = "top") +   # Change legend position
   theme_grey()  # Apply gray theme
 
-# change y axis unit to 15K  https://stackoverflow.com/questions/13973644/si-prefixes-in-ggplot2-axis-labels
-# + scale_y_continuous(labels=format_si()) + 
 ```
 
 
@@ -112,7 +107,6 @@ dim(unique_id)
 #############################################################
 ########### calculation and statistical meaning #############
 #############################################################
-### http://datafeedtoolbox.com/more-accurate-ab-testing-using-raw-analytics-data-apache-spark-and-r/
 # compare two population proportion
 
 # conversion rate overall
